@@ -1,0 +1,10 @@
+# Data files — large generated/source data, not meant to be reformatted
+src/data/
+
+# Build output and dependencies
+dist/
+node_modules/
+
+# Lockfiles
+package-lock.json
+yarn.lock
