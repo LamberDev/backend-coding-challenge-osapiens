@@ -11,7 +11,8 @@
     "emitDecoratorMetadata": true,               // Emits design-type metadata for decorated declarations
     "outDir": "./dist",                          // Output directory for compiled files
     "rootDir": "./src",                          // Root directory of input files
-    "forceConsistentCasingInFileNames": true     // Ensures consistent casing in file names
+    "forceConsistentCasingInFileNames": true,    // Ensures consistent casing in file names
+    "skipLibCheck": true                         // Skip type-checking of declaration files in node_modules
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
