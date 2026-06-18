@@ -3,6 +3,7 @@ import { Task } from '../models/Task';
 import { TaskRunner, TaskStatus } from './taskRunner';
 import { Result } from '../models/Result';
 import { checkDependencyReadiness } from './dependencyUtils';
+import { finalizeWorkflow } from '../workflows/finalizeWorkflow';
 import { config } from '../config/env';
 
 async function cascadeFailTask(
@@ -13,6 +14,7 @@ async function cascadeFailTask(
   task.status = TaskStatus.Failed;
   task.progress = `dependency task ${depId} failed`;
   await taskRepository.save(task);
+  await finalizeWorkflow(taskRepository.manager, task.workflow.workflowId);
 }
 
 async function forwardDependencyInput(task: Task): Promise<void> {

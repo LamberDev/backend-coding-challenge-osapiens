@@ -2,17 +2,16 @@ import { TaskStatus } from './taskStatus';
 import { Repository } from 'typeorm';
 import { Task } from '../models/Task';
 import { getJobForTaskType } from '../jobs/JobFactory';
-import { WorkflowStatus } from '../workflows/workflowStatus';
-import { Workflow } from '../models/Workflow';
 import { Result } from '../models/Result';
+import { finalizeWorkflow } from '../workflows/finalizeWorkflow';
 export { TaskStatus };
 
 export class TaskRunner {
   constructor(private taskRepository: Repository<Task>) {}
 
   /**
-   * Runs the appropriate job based on the task's type, managing the task's status.
-   * @param task - The task entity that determines which job to run.
+   * Runs the appropriate job based on the task's type, managing the task's
+   * status, then finalizes the owning workflow.
    * @throws If the job fails, it rethrows the error.
    */
   async run(task: Task): Promise<void> {
@@ -47,33 +46,19 @@ export class TaskRunner {
       task.progress = null;
       await this.taskRepository.save(task);
 
+      // Finalize on failure too, so a workflow whose last task fails is not
+      // left stuck in_progress.
+      await finalizeWorkflow(
+        this.taskRepository.manager,
+        task.workflow.workflowId,
+      );
+
       throw error;
     }
 
-    const workflowRepository =
-      this.taskRepository.manager.getRepository(Workflow);
-    const currentWorkflow = await workflowRepository.findOne({
-      where: { workflowId: task.workflow.workflowId },
-      relations: ['tasks'],
-    });
-
-    if (currentWorkflow) {
-      const allCompleted = currentWorkflow.tasks.every(
-        (t) => t.status === TaskStatus.Completed,
-      );
-      const anyFailed = currentWorkflow.tasks.some(
-        (t) => t.status === TaskStatus.Failed,
-      );
-
-      if (anyFailed) {
-        currentWorkflow.status = WorkflowStatus.Failed;
-      } else if (allCompleted) {
-        currentWorkflow.status = WorkflowStatus.Completed;
-      } else {
-        currentWorkflow.status = WorkflowStatus.InProgress;
-      }
-
-      await workflowRepository.save(currentWorkflow);
-    }
+    await finalizeWorkflow(
+      this.taskRepository.manager,
+      task.workflow.workflowId,
+    );
   }
 }
