@@ -5,11 +5,13 @@ import { Workflow } from '../models/Workflow';
 import { Task } from '../models/Task';
 import { TaskStatus } from '../workers/taskStatus';
 import { WorkflowStatus } from './workflowStatus';
+import { detectCycle } from '../workers/dependencyUtils';
 export { WorkflowStatus };
 
-interface WorkflowStep {
+export interface WorkflowStep {
   taskType: string;
   stepNumber: number;
+  dependsOn?: number;
 }
 
 interface WorkflowDefinition {
@@ -34,6 +36,9 @@ export class WorkflowFactory {
   ): Promise<Workflow> {
     const fileContent = fs.readFileSync(filePath, 'utf8');
     const workflowDef = yaml.load(fileContent) as WorkflowDefinition;
+
+    detectCycle(workflowDef.steps);
+
     const workflowRepository = this.dataSource.getRepository(Workflow);
     const taskRepository = this.dataSource.getRepository(Task);
     const workflow = new Workflow();
@@ -54,7 +59,22 @@ export class WorkflowFactory {
       return task;
     });
 
-    await taskRepository.save(tasks);
+    const savedTasks = await taskRepository.save(tasks);
+    
+    const taskByStepNumber = new Map(savedTasks.map((t) => [t.stepNumber, t]));
+    const stepsWithDep = workflowDef.steps.filter(
+      (s) => s.dependsOn !== undefined,
+    );
+
+    if (stepsWithDep.length > 0) {
+      for (const step of stepsWithDep) {
+        const task = taskByStepNumber.get(step.stepNumber)!;
+        task.dependsOn = taskByStepNumber.get(step.dependsOn!)!;
+      }
+      await taskRepository.save(
+        stepsWithDep.map((s) => taskByStepNumber.get(s.stepNumber)!),
+      );
+    }
 
     return savedWorkflow;
   }
