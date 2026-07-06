@@ -7,8 +7,8 @@ import { Workflow } from '../models/Workflow';
 import { TaskStatus } from '../workers/taskStatus';
 import { WorkflowStatus } from '../workflows/workflowStatus';
 import { NextFunction } from 'express';
-import { getWorkflowStatus } from './workflowRoutes';
-import { NotFoundError } from '../http/HttpError';
+import { getWorkflowStatus, getWorkflowResults } from './workflowRoutes';
+import { HttpError, NotFoundError } from '../http/HttpError';
 
 function makeReq(params: Record<string, string>): Request {
   return { params } as unknown as Request;
@@ -60,6 +60,18 @@ async function seedWorkflow(statuses: TaskStatus[]): Promise<string> {
   });
   await AppDataSource.getRepository(Task).save(tasks);
 
+  return saved.workflowId;
+}
+
+async function seedFinalized(
+  status: WorkflowStatus,
+  finalResult: string | null,
+): Promise<string> {
+  const workflow = new Workflow();
+  workflow.clientId = 'client-e2e';
+  workflow.status = status;
+  workflow.finalResult = finalResult;
+  const saved = await AppDataSource.getRepository(Workflow).save(workflow);
   return saved.workflowId;
 }
 
@@ -121,6 +133,85 @@ describe('GET /workflow/:id/status (handler)', () => {
       expect(error).toBeInstanceOf(NotFoundError);
       expect((error as NotFoundError).statusCode).toBe(404);
       expect((error as NotFoundError).message.length).toBeGreaterThan(0);
+    });
+  });
+});
+
+describe('GET /workflow/:id/results (handler)', () => {
+  describe('given a completed workflow with a persisted finalResult', () => {
+    it('should respond 200 with the parsed { workflowId, status, finalResult } body', async () => {
+      // Arrange
+      const workflowId = await seedFinalized(
+        WorkflowStatus.Completed,
+        JSON.stringify({ summary: 'all done', completedTasks: 2 }),
+      );
+      const { res, captured } = makeRes();
+      const { next } = makeNext();
+
+      // Act
+      await getWorkflowResults(makeReq({ id: workflowId }), res, next);
+
+      // Assert
+      expect(captured.statusCode).toBe(200);
+      expect(captured.body).toEqual({
+        workflowId,
+        status: WorkflowStatus.Completed,
+        finalResult: { summary: 'all done', completedTasks: 2 },
+      });
+    });
+  });
+
+  describe('given an in_progress workflow', () => {
+    it('should forward a 400 HttpError to the error middleware', async () => {
+      // Arrange
+      const workflowId = await seedFinalized(WorkflowStatus.InProgress, null);
+      const { res } = makeRes();
+      const { next, forwarded } = makeNext();
+
+      // Act
+      await getWorkflowResults(makeReq({ id: workflowId }), res, next);
+
+      // Assert
+      const error = forwarded();
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError).statusCode).toBe(400);
+    });
+  });
+
+  describe('given a failed workflow with a populated finalResult', () => {
+    it('should forward a 400 HttpError and withhold the finalResult', async () => {
+      // Arrange
+      const workflowId = await seedFinalized(
+        WorkflowStatus.Failed,
+        JSON.stringify({ summary: 'boom' }),
+      );
+      const { res, captured } = makeRes();
+      const { next, forwarded } = makeNext();
+
+      // Act
+      await getWorkflowResults(makeReq({ id: workflowId }), res, next);
+
+      // Assert
+      const error = forwarded();
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError).statusCode).toBe(400);
+      expect(captured.body).toBeUndefined();
+    });
+  });
+
+  describe('given an unknown workflow id', () => {
+    it('should forward a 404 NotFoundError to the error middleware', async () => {
+      // Arrange
+      const { res } = makeRes();
+      const { next, forwarded } = makeNext();
+
+      // Act
+      await getWorkflowResults(makeReq({ id: 'does-not-exist' }), res, next);
+
+      // Assert
+      const error = forwarded();
+      expect(error).toBeInstanceOf(NotFoundError);
+      expect((error as NotFoundError).statusCode).toBe(404);
     });
   });
 });

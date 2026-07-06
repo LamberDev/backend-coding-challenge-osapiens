@@ -5,7 +5,7 @@ import { Task } from '../models/Task';
 import { Workflow } from '../models/Workflow';
 import { TaskStatus } from '../workers/taskStatus';
 import { WorkflowStatus } from './workflowStatus';
-import { WorkflowStatusService } from './workflowStatusService';
+import { WorkflowQueryService } from './workflowQueryService';
 
 async function seedWorkflow(statuses: TaskStatus[]): Promise<string> {
   const workflow = new Workflow();
@@ -28,6 +28,18 @@ async function seedWorkflow(statuses: TaskStatus[]): Promise<string> {
   return saved.workflowId;
 }
 
+async function seedFinalized(
+  status: WorkflowStatus,
+  finalResult: string | null,
+): Promise<string> {
+  const workflow = new Workflow();
+  workflow.clientId = 'client-e2e';
+  workflow.status = status;
+  workflow.finalResult = finalResult;
+  const saved = await AppDataSource.getRepository(Workflow).save(workflow);
+  return saved.workflowId;
+}
+
 beforeAll(async () => {
   await AppDataSource.initialize();
 });
@@ -40,8 +52,8 @@ beforeEach(async () => {
   await AppDataSource.synchronize(true);
 });
 
-describe('WorkflowStatusService', () => {
-  const service = new WorkflowStatusService(AppDataSource);
+describe('WorkflowQueryService', () => {
+  const service = new WorkflowQueryService(AppDataSource);
 
   describe('given an existing workflow', () => {
     it('should return its status summary with task counts', async () => {
@@ -74,6 +86,60 @@ describe('WorkflowStatusService', () => {
 
       // Assert
       expect(summary).toBeNull();
+    });
+  });
+
+  describe('getResults', () => {
+    describe('given a completed workflow with a persisted finalResult', () => {
+      it('should return a ready outcome with the parsed body', async () => {
+        // Arrange
+        const workflowId = await seedFinalized(
+          WorkflowStatus.Completed,
+          JSON.stringify({ summary: 'all done', completedTasks: 2 }),
+        );
+
+        // Act
+        const outcome = await service.getResults(workflowId);
+
+        // Assert
+        expect(outcome).toEqual({
+          ready: true,
+          body: {
+            workflowId,
+            status: WorkflowStatus.Completed,
+            finalResult: { summary: 'all done', completedTasks: 2 },
+          },
+        });
+      });
+    });
+
+    describe('given an in_progress workflow', () => {
+      it('should return a not-ready outcome', async () => {
+        // Arrange
+        const workflowId = await seedFinalized(
+          WorkflowStatus.InProgress,
+          null,
+        );
+
+        // Act
+        const outcome = await service.getResults(workflowId);
+
+        // Assert
+        expect(outcome).toEqual({ ready: false });
+      });
+    });
+
+    describe('given an unknown workflow id', () => {
+      it('should return null so the controller can map it to 404', async () => {
+        // Arrange
+        const unknownId = 'does-not-exist';
+
+        // Act
+        const outcome = await service.getResults(unknownId);
+
+        // Assert
+        expect(outcome).toBeNull();
+      });
     });
   });
 });
