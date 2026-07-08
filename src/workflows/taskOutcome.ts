@@ -18,15 +18,19 @@ export interface TaskOutcomeEntry {
 const FAILED_TASK_NOTE =
   'Task failed; no error detail is persisted by the current data model.';
 
-export function parseOutput(result: Result | null): unknown {
-  if (result?.data == null) {
+export function parseJsonWithFallback(raw: string | null): unknown {
+  if (raw == null) {
     return null;
   }
   try {
-    return JSON.parse(result.data);
+    return JSON.parse(raw);
   } catch {
-    return result.data;
+    return raw;
   }
+}
+
+export function parseOutput(result: Result | null): unknown {
+  return parseJsonWithFallback(result?.data ?? null);
 }
 
 const entryRenderers: Record<
